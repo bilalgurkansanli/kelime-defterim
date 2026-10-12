@@ -81,7 +81,11 @@ select{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:
 .mark{width:26px;height:26px;border-radius:50%;border:1.5px solid var(--line);background:none;cursor:pointer;color:transparent;font-size:14px;line-height:1;display:grid;place-items:center}
 .mark:hover{border-color:var(--ok)}
 .item.learned .mark{background:var(--ok);border-color:var(--ok);color:var(--paper)}
-.item.learned .de,.item.learned .en,.item.learned .tr{opacity:.55}
+.item.learned .en:not(.veil),.item.learned .tr:not(.veil){opacity:.6}
+.item.learned .veil{background:var(--ok-bg)}
+.veil{position:relative;min-height:1.4em}
+.veil::after{content:"göster";position:absolute;right:10px;top:50%;transform:translateY(-50%);font-family:var(--f-ui);font-size:11px;letter-spacing:.06em;color:var(--muted)}
+.item.learned .veil::after{color:var(--ok)}
 .veil{cursor:pointer;border-radius:4px;background:var(--soft);color:transparent;user-select:none}
 .veil:hover{outline:1px dashed var(--muted)}
 .empty{padding:40px 16px;text-align:center;color:var(--muted)}
@@ -150,6 +154,7 @@ kbd{font-family:var(--f-mono);font-size:11px;border:1px solid var(--line);border
       <div class="hidecols">Sınav modu, gizle:
         <div class="seg" id="hideSeg"><button data-c="de" aria-pressed="false">Almanca</button><button data-c="en" aria-pressed="false">İngilizce</button><button data-c="tr" aria-pressed="false">Türkçe</button></div>
       </div>
+      <label class="chk"><input type="checkbox" id="learnedDeOnly"> Bildiklerimde sadece Almanca</label>
       <label class="chk"><input type="checkbox" id="hideLearned"> Öğrendiklerimi gösterme</label>
       <span class="legend"><span class="prep">auf + Akk.</span> fiilin aldığı edat</span>
       <span class="count" id="count"></span>
@@ -189,7 +194,7 @@ const store = {
 };
 // learned set keyed by German headword
 let learned = new Set(store.get('kd_learned',[]));
-const st = Object.assign({lv:0,topic:-1,wtype:-1,sort:'topic',hide:{de:false,en:false,tr:false},hideLearned:false,ask:'de',view:'list'}, store.get('kd_state',{}));
+const st = Object.assign({lv:0,topic:-1,wtype:-1,sort:'topic',hide:{de:false,en:false,tr:false},hideLearned:false,learnedDeOnly:true,ask:'de',view:'list'}, store.get('kd_state',{}));
 st.q=''; let page=0; const PER=100;
 const revealed=new Set();
 
@@ -228,7 +233,8 @@ function compute(){
 const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function deHtml(s){const m=s.match(/^(der|die|das|sich)\s+(.*)$/);return m?`<span class="art">${m[1]}</span> ${esc(m[2])}`:esc(s)}
 function cell(cls,label,html,i){
-  const hid=st.hide[cls]&&!revealed.has(i+cls);
+  const quiz=st.learnedDeOnly&&cls!=='de'&&learned.has(R[i][0]);
+  const hid=(st.hide[cls]||quiz)&&!revealed.has(i+cls);
   return `<span class="${cls}${hid?' veil':''}" data-i="${i}" data-c="${cls}"${hid?' title="Görmek için dokun"':''}><span class="lbl">${label}</span>${html}</span>`;
 }
 function renderList(){
@@ -280,7 +286,7 @@ function syncControls(){
   document.querySelectorAll('#lvSeg button').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.v===st.lv));
   document.querySelectorAll('#hideSeg button').forEach(b=>b.setAttribute('aria-pressed',st.hide[b.dataset.c]));
   document.querySelectorAll('#askSeg button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.a===st.ask));
-  $('topic').value=st.topic;$('wtype').value=st.wtype;$('sort').value=st.sort;$('hideLearned').checked=st.hideLearned;
+  $('topic').value=st.topic;$('wtype').value=st.wtype;$('sort').value=st.sort;$('hideLearned').checked=st.hideLearned;$('learnedDeOnly').checked=st.learnedDeOnly;
   $('tabList').setAttribute('aria-selected',st.view==='list');$('tabCards').setAttribute('aria-selected',st.view==='cards');
   $('listView').hidden=st.view!=='list';$('cardView').hidden=st.view!=='cards';
   document.querySelector('.hidecols').hidden=st.view!=='list';
@@ -293,15 +299,18 @@ $('topic').addEventListener('change',e=>{st.topic=+e.target.value;refresh()});
 $('wtype').addEventListener('change',e=>{st.wtype=+e.target.value;refresh()});
 $('sort').addEventListener('change',e=>{st.sort=e.target.value;if(st.sort==='shuffle')shuffleKey=R.map(()=>Math.random());refresh()});
 $('hideLearned').addEventListener('change',e=>{st.hideLearned=e.target.checked;refresh()});
+$('learnedDeOnly').addEventListener('change',e=>{st.learnedDeOnly=e.target.checked;revealed.clear();refresh(false)});
 $('prev').onclick=()=>{page--;renderList();window.scrollTo({top:0})};
 $('next').onclick=()=>{page++;renderList();window.scrollTo({top:0})};
 $('tabList').onclick=()=>{st.view='list';syncControls();refresh(false)};
 $('tabCards').onclick=()=>{st.view='cards';shown=false;syncControls();refresh(false)};
 $('rows').addEventListener('click',e=>{
   const m=e.target.closest('.mark');
-  if(m){const w=R[+m.dataset.i][0];learned.has(w)?learned.delete(w):learned.add(w);store.set('kd_learned',[...learned]);
+  if(m){const i=+m.dataset.i,w=R[i][0];learned.has(w)?learned.delete(w):learned.add(w);store.set('kd_learned',[...learned]);
+    revealed.delete(i+'en');revealed.delete(i+'tr');
     if(st.hideLearned){compute()} renderList();return}
-  const v=e.target.closest('.veil'); if(v){revealed.add(v.dataset.i+v.dataset.c);renderList()}
+  const v=e.target.closest('.veil'); if(v){revealed.add(v.dataset.i+v.dataset.c);renderList();return}
+  const o=e.target.closest('.en,.tr'); if(o&&revealed.has(o.dataset.i+o.dataset.c)){revealed.delete(o.dataset.i+o.dataset.c);renderList()}
 });
 $('cardBtns').addEventListener('click',e=>{const id=e.target.id;if(id==='show')cardShow();if(id==='know')cardNext(true);if(id==='again')cardNext(false)});
 document.addEventListener('keydown',e=>{
